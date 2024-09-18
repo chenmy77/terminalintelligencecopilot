@@ -741,4 +741,33 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
 
         return winrt::single_threaded_vector<Model::Command>(std::move(result));
     }
+
+    // Method description:
+    // * Convert the list of recent commands into a list of sendInput actions to
+    //   send those commands.
+    // * We'll give each command a "history" icon.
+    // * If directories is true, we'll prepend "cd " to each command, so that
+    //   the command will be run as a directory change instead.
+    Model::Command Command::MakeCommand(winrt::hstring name, winrt::hstring id, winrt::hstring iconPath, bool hasNestedCommands, winrt::hstring currentCommandLine, winrt::hstring commandLine)
+    {
+        auto command = winrt::make_self<Command>();
+        //IActionArgs args{ nullptr };
+        Json::Value inputObject{ Json::ValueType::objectValue };
+        inputObject[static_cast<std::string>(InputKey)] = winrt::to_string(commandLine);
+
+        std::wstring cdText = L"";
+        auto backspaces = std::wstring(currentCommandLine.size(), L'\x7f');
+        auto args = winrt::make_self<SendInputArgs>(
+            winrt::hstring{ fmt::format(FMT_COMPILE(L"{}{}{}"), cdText, backspaces, commandLine) });
+
+        Model::ActionAndArgs actionAndArgs{ ShortcutAction::SendInput, *args };
+
+        command->_name = winrt::hstring{ name };
+        command->_iconPath = iconPath;
+        command->_ID = id;
+        command->_nestedCommand = hasNestedCommands;
+        command->_ActionAndArgs = actionAndArgs;
+
+        return *command;
+    }
 }

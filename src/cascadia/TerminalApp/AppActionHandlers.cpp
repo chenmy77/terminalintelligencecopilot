@@ -9,6 +9,10 @@
 #include "../WinRTUtils/inc/WtExeUtils.h"
 #include "../../types/inc/utils.hpp"
 #include "Utils.h"
+#include "winrt/Windows.Web.Http.h"
+#include "winrt/Windows.Web.Http.Headers.h"
+#include "winrt/Windows.Data.Json.h"
+#include <winrt/Windows.Storage.Streams.h>
 
 using namespace winrt::Windows::ApplicationModel::DataTransfer;
 using namespace winrt::Windows::UI::Xaml;
@@ -1441,6 +1445,154 @@ namespace winrt::TerminalApp::implementation
         }
     }
 
+    winrt::Windows::Foundation::IAsyncOperation<winrt::hstring> AOAIRequest(std::string prompt)
+    {
+        const winrt::hstring API_KEY = L"1d7261a1284d4d219162ae124aac1ff6";
+        const winrt::hstring endpoint = L"https://nascore.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview";
+
+        static constexpr std::wstring_view HttpUserAgent = L"Mozilla/5.0 (Windows NT 10.0) Terminal/1.0";
+        winrt::Windows::Web::Http::HttpClient httpClient = winrt::Windows::Web::Http::HttpClient{};
+
+        winrt::Windows::Foundation::Uri uri{ endpoint };
+        winrt::Windows::Web::Http::HttpMethod requestPost = winrt::Windows::Web::Http::HttpMethod::Post();
+        winrt::Windows::Web::Http::HttpRequestMessage request(requestPost, uri);
+        //{ winrt::Windows::Web::Http::HttpMethod::Post, uri };
+
+        request.Headers().Append(L"api-key", API_KEY);
+        request.Headers().Append(L"User-Agent", HttpUserAgent);
+
+        std::string systemRole = "system";
+        std::string userRole = "user";
+        std::string content_type = "text";
+        std::string agentText = "You are a software development expert. Please tell me what command I should use based on my information.";
+        //std::string content_text = "You are an AI assistant that helps people find information.";
+        std::string content_text = prompt;
+        double temperature = 0.7;
+        double top_p = 0.95;
+        int max_tokens = 800;
+
+        winrt::Windows::Data::Json::JsonObject object;
+        object.Insert(L"temperature", Windows::Data::Json::JsonValue::CreateNumberValue(temperature));
+        object.Insert(L"top_p", Windows::Data::Json::JsonValue::CreateNumberValue(top_p));
+        object.Insert(L"max_tokens", Windows::Data::Json::JsonValue::CreateNumberValue(max_tokens));
+
+        winrt::Windows::Data::Json::JsonArray messageListObject;
+
+        winrt::Windows::Data::Json::JsonObject agentMessageObject;
+        agentMessageObject.Insert(L"role", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(systemRole)));
+
+        winrt::Windows::Data::Json::JsonArray agentContentListObject;
+        winrt::Windows::Data::Json::JsonObject agentContentObject;
+        agentContentObject.Insert(L"type", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(content_type)));
+        agentContentObject.Insert(L"text", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(agentText)));
+        agentContentListObject.Append(agentContentObject);
+        agentMessageObject.Insert(L"content", agentContentListObject);
+
+        winrt::Windows::Data::Json::JsonObject userMessageObject;
+        userMessageObject.Insert(L"role", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(userRole)));
+
+        winrt::Windows::Data::Json::JsonArray userContentListObject;
+        winrt::Windows::Data::Json::JsonObject userContentObject;
+        userContentObject.Insert(L"type", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(content_type)));
+        userContentObject.Insert(L"text", Windows::Data::Json::JsonValue::CreateStringValue(winrt::to_hstring(prompt)));
+        userContentListObject.Append(userContentObject);
+        userMessageObject.Insert(L"content", userContentListObject);
+
+
+        messageListObject.Append(agentMessageObject);
+        messageListObject.Append(userMessageObject);
+
+        object.Insert(L"messages", messageListObject);
+
+        std::string json_string = winrt::to_string(object.ToString());
+        winrt::Windows::Web::Http::HttpStringContent content(object.ToString(), Windows::Storage::Streams::UnicodeEncoding::Utf8, L"application/json");
+
+        hstring payload = winrt::to_hstring(json_string);
+        request.Content(content);
+
+        auto response = co_await httpClient.SendRequestAsync(request);
+        auto responseContent = co_await response.Content().ReadAsStringAsync();
+
+        co_return responseContent;
+    }
+
+    std::string buildPrompt(winrt::hstring commandLine, IVector<winrt::hstring> history)
+    {
+        std::string historyStr = "";
+        for (auto h : history)
+        {
+            historyStr = historyStr + winrt::to_string(h.c_str()) + "\r\n";
+        }
+
+        auto question = fmt::format("I am using a Windows device with the latest Windows 11 version. I am using the latest PowerShell 7 version. I have typed these commands '{0}' before. Now I have typed character'{1}'. Please give me the commands I need based on my historical input commands and the text I am currently inputting. Note that these commands can be Windows commands, PowerShell scripts, or commands corresponding to other common developer tools. You only need to give the three most likely commands, sort them in order of likelihood, the commands at the top are the most likely, and use '$$' to separate the commands. Please give me the commands I need directly.",
+                                    historyStr,
+                                    winrt::to_string(commandLine));
+        return question;
+    }
+
+    void trimString(std::string& str)
+    {
+        str.erase(std::remove_if(str.begin(), str.end(), ::isspace), str.end());
+    }
+
+    // for string delimiter
+    std::vector<std::string> split(std::string s, std::string delimiter)
+    {
+        size_t pos_start = 0, pos_end, delim_len = delimiter.length();
+        std::string token;
+        std::vector<std::string> res;
+
+        while ((pos_end = s.find(delimiter, pos_start)) != std::string::npos)
+        {
+            token = s.substr(pos_start, pos_end - pos_start);
+            pos_start = pos_end + delim_len;
+            //trimString(token);
+            res.push_back(token);
+        }
+
+        res.push_back(s.substr(pos_start));
+        return res;
+    }
+
+
+    std::vector<std::string> parseAOAIResponse(std::string responseString)
+    {
+        winrt::Windows::Data::Json::JsonObject object = winrt::Windows::Data::Json::JsonObject::Parse(winrt::to_hstring(responseString));
+
+        // 获取 JSON 对象中的值
+        auto choiceObject = object.GetNamedArray(L"choices").GetObjectAt(0);
+        auto messageObject = choiceObject.GetNamedObject(L"message");
+        auto content = winrt::to_string(messageObject.GetNamedString(L"content"));
+
+        auto result = split(content, "$$");
+
+        return result;
+    }
+
+
+    winrt::Windows::Foundation::IAsyncOperation<IVector<Command>> doCopilotSuggestion(CommandHistoryContext context)
+    {
+        auto currentCommandLine = context.CurrentCommandline();
+        auto history = context.History();
+        auto prompt = buildPrompt(currentCommandLine, history);
+        auto response = co_await AOAIRequest(prompt);
+        auto results = parseAOAIResponse(winrt::to_string(response));
+
+        IVector<Command> commands = single_threaded_vector<Command>();
+        int idx = 0;
+        for (auto result : results)
+        {
+            idx++;
+            auto name = winrt::to_hstring(result);
+            auto commandLine = winrt::to_hstring(result);
+
+            auto command = Command::MakeCommand(name, winrt::to_hstring(std::to_string(idx)), L"", false, currentCommandLine, commandLine);
+            commands.Append(command);
+        }
+
+        co_return commands;
+    }
+
     winrt::fire_and_forget TerminalPage::_doHandleSuggestions(SuggestionsArgs realArgs)
     {
         const auto source = realArgs.Source();
@@ -1511,11 +1663,17 @@ namespace winrt::TerminalApp::implementation
 
         co_await wil::resume_foreground(Dispatcher());
 
+        auto copilotSuggestion = co_await doCopilotSuggestion(context);
+        for (auto suggestion : copilotSuggestion)
+        {
+            commandsCollection.push_back(suggestion);
+        }
+
         // Open the palette with all these commands in it.
         _OpenSuggestions(_GetActiveControl(),
                          winrt::single_threaded_vector<Command>(std::move(commandsCollection)),
                          SuggestionsMode::Palette,
-                         currentCommandline);
+                         L"");
     }
 
     void TerminalPage::_HandleColorSelection(const IInspectable& /*sender*/,
@@ -1611,4 +1769,54 @@ namespace winrt::TerminalApp::implementation
             args.Handled(handled);
         }
     }
+
+
+    winrt::hstring parseUserInput(winrt::hstring buffer, winrt::hstring userDirectory)
+    {
+        // 将 hstring 转换为 wstring
+        std::wstring bufferW = buffer.c_str();
+        std::wstring userDirectoryW = userDirectory.c_str();
+        std::wstring pattern = userDirectoryW + L">";
+
+        auto idx = bufferW.rfind(pattern);
+
+        auto result = bufferW.substr(idx + pattern.length());
+
+        return winrt::hstring(result);
+    }
+
+    void TerminalPage::_HandleCopilot(const IInspectable& /*sender*/,
+                                       const ActionEventArgs&)
+    {
+        //// First, check if we're in broadcast input mode. If so, let's tell all
+        //// the controls to paste.
+        //if (const auto& tab{ _GetFocusedTabImpl() })
+        //{
+        //    //auto content = tab->GetActiveContent();
+        //    if (tab->TabStatus().IsInputBroadcastActive())
+        //    {
+        //        tab->GetRootPane()->WalkTree([](auto&& pane) {
+        //            if (auto control = pane->GetTerminalControl())
+        //            {
+        //                control.PasteTextFromClipboard();
+        //            }
+        //        });
+        //        return;
+        //    }
+        //}
+
+        //// The focused tab wasn't in broadcast mode. No matter. Just ask the
+        //// current one to paste.
+        //if (const auto& control{ _GetActiveControl() })
+        //{
+        //    //auto history = control.CommandHistory();
+        //    auto buffer = control.ReadEntireBuffer();
+        //    auto currentWorkingDirectory = control.CurrentWorkingDirectory();
+        //    auto userCommand = parseUserInput(buffer, currentWorkingDirectory);
+
+        //    return;
+        //}
+    }
+
+
 }

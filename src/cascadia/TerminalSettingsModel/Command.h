@@ -39,6 +39,7 @@ static constexpr std::string_view IterateOnKey{ "iterateOn" };
 static constexpr std::string_view CommandsKey{ "commands" };
 static constexpr std::string_view KeysKey{ "keys" };
 static constexpr std::string_view DescriptionKey{ "description" };
+static constexpr std::string_view InputKey{ "input" };
 
 namespace winrt::Microsoft::Terminal::Settings::Model::implementation
 {
@@ -83,6 +84,7 @@ namespace winrt::Microsoft::Terminal::Settings::Model::implementation
                                                                                            winrt::hstring currentCommandline,
                                                                                            bool directories,
                                                                                            hstring iconPath);
+        static Model::Command MakeCommand(winrt::hstring name, winrt::hstring id, winrt::hstring iconPath, bool hasNestedCommands, winrt::hstring currentCommandLine, winrt::hstring commandLine);
 
         WINRT_PROPERTY(ExpandCommandType, IterateOn, ExpandCommandType::None);
         WINRT_PROPERTY(Model::ActionAndArgs, ActionAndArgs);
