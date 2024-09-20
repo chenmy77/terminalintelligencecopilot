@@ -1586,7 +1586,7 @@ namespace winrt::TerminalApp::implementation
             auto name = winrt::to_hstring(result);
             auto commandLine = winrt::to_hstring(result);
 
-            auto command = Command::MakeCommand(name, winrt::to_hstring(std::to_string(idx)), L"", false, currentCommandLine, commandLine);
+            auto command = Command::MakeCommand(name, winrt::to_hstring(std::to_string(idx)), L"\ue728", false, currentCommandLine, commandLine);
             commands.Append(command);
         }
 
